@@ -88,6 +88,9 @@ ast! {
             pub operator: Token,
             pub right: Box<Expr>,
         },
+        Variable: struct {
+            pub name: Token,
+        },
     },
     Stmt {
         Expression: struct {
@@ -96,43 +99,9 @@ ast! {
         Print: struct {
             pub expr: Expr,
         },
+        Var: struct {
+            pub name: Token,
+            pub initializer: Option<Expr>,
+        },
     },
-}
-
-macro_rules! parenthesize {
-    ($visitor:expr, $name:expr, $($expr:expr),*) => {
-        format!("({} {})", $name, vec![$($expr.walk($visitor)),*].join(" "))
-    };
-}
-
-pub struct AstPrinter;
-
-impl AstPrinter {
-    pub fn print(&self, expr: &Expr) -> String {
-        expr.walk(self)
-    }
-}
-
-impl ExprVisitor<String> for &AstPrinter {
-    fn visit_binary(self, expr: &Binary) -> String {
-        parenthesize!(self, expr.operator.lexeme, expr.left, expr.right)
-    }
-
-    fn visit_grouping(self, expr: &Grouping) -> String {
-        parenthesize!(self, "group", expr.expr)
-    }
-
-    fn visit_literal(self, expr: &Literal) -> String {
-        match expr {
-            Literal::String(s) => s.clone(),
-            Literal::Number(n) => n.to_string(),
-            Literal::True => "true".to_string(),
-            Literal::False => "false".to_string(),
-            Literal::Nil => "nil".to_string(),
-        }
-    }
-
-    fn visit_unary(self, expr: &Unary) -> String {
-        parenthesize!(self, expr.operator.lexeme, expr.right)
-    }
 }

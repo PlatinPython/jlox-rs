@@ -2,8 +2,8 @@ use std::cmp::PartialEq;
 use std::fmt::{Display, Formatter};
 
 use crate::ast::{
-    Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor, Unary,
-    Walkable,
+    Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor, Unary, Var,
+    Variable, Walkable,
 };
 use crate::lox::Lox;
 use crate::token::{Token, TokenType};
@@ -33,6 +33,7 @@ impl Display for Value {
     }
 }
 
+#[derive(Debug)]
 pub struct Error {
     pub token: Token,
     pub message: &'static str,
@@ -139,6 +140,10 @@ impl ExprVisitor<Result<Value>> for &Interpreter {
             _ => Ok(Value::Nil),
         }
     }
+
+    fn visit_variable(self, expr: &Variable) -> Result<Value> {
+        todo!()
+    }
 }
 
 impl StmtVisitor<Result<()>> for &Interpreter {
@@ -150,5 +155,9 @@ impl StmtVisitor<Result<()>> for &Interpreter {
         let value = self.evaluate(&stmt.expr)?;
         println!("{value}");
         Ok(())
+    }
+
+    fn visit_var(self, stmt: &Var) -> Result<()> {
+        todo!()
     }
 }

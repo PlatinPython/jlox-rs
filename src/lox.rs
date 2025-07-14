@@ -55,7 +55,7 @@ impl Lox {
         let mut scanner = Scanner::new(source);
         let tokens = scanner.scan_tokens(self);
         let mut parser = Parser::new(tokens);
-        let stmts = parser.parse(self);
+        let stmts = parser.parse().unwrap();
 
         if self.had_error {
             return;

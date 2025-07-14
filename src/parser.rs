@@ -1,6 +1,32 @@
 use crate::ast::{Expr, Literal, Stmt};
-use crate::lox::Lox;
 use crate::token::{Token, TokenType};
+
+#[derive(Debug)]
+pub struct Error {
+    message: String,
+    line: usize,
+}
+
+type Result<T, E = Error> = std::result::Result<T, E>;
+
+trait TokenPred {
+    fn matches(&self, token: &Token) -> bool;
+}
+
+impl TokenPred for TokenType {
+    fn matches(&self, token: &Token) -> bool {
+        &token.token_type == self
+    }
+}
+
+impl<F> TokenPred for F
+where
+    F: Fn(&Token) -> bool,
+{
+    fn matches(&self, token: &Token) -> bool {
+        self(token)
+    }
+}
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -12,65 +38,98 @@ impl Parser {
         Self { tokens, current: 0 }
     }
 
-    pub fn parse(&mut self, lox: &mut Lox) -> Vec<Stmt> {
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, Vec<Error>> {
         let mut stmts = vec![];
+        let mut errors = vec![];
         while !self.is_at_end() {
-            stmts.push(self.statement(lox));
+            match self.declaration() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(e) => errors.push(e),
+            }
         }
-        stmts
+        if errors.is_empty() {
+            Ok(stmts)
+        } else {
+            Err(errors)
+        }
     }
 
-    fn expression(&mut self, lox: &mut Lox) -> Expr {
-        self.equality(lox)
+    fn expression(&mut self) -> Result<Expr> {
+        self.equality()
     }
 
-    fn statement(&mut self, lox: &mut Lox) -> Stmt {
+    fn declaration(&mut self) -> Result<Stmt> {
+        let res = if self.match_(&[TokenType::Var]) {
+            return self.var_declaration();
+        } else {
+            self.statement()
+        };
+        if res.is_err() {
+            self.synchronize();
+        }
+        res
+    }
+
+    fn statement(&mut self) -> Result<Stmt> {
         if self.match_(&[TokenType::Print]) {
-            return self.print_statement(lox);
+            return self.print_statement();
         }
-        self.expression_statement(lox)
+        self.expression_statement()
     }
 
-    fn print_statement(&mut self, lox: &mut Lox) -> Stmt {
-        let value = self.expression(lox);
-        self.consume(lox, TokenType::Semicolon, "Expect ';' after value.");
-        Stmt::new_print(value)
+    fn print_statement(&mut self) -> Result<Stmt> {
+        let value = self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
+        Ok(Stmt::new_print(value))
     }
 
-    fn expression_statement(&mut self, lox: &mut Lox) -> Stmt {
-        let expr = self.expression(lox);
-        self.consume(lox, TokenType::Semicolon, "Expect ';' after expression.");
-        Stmt::new_expression(expr)
+    fn var_declaration(&mut self) -> Result<Stmt> {
+        let name = self.consume_identifier("Expect variable name.")?;
+
+        let initializer = if self.match_(&[TokenType::Equal]) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        )?;
+        Ok(Stmt::new_var(name, initializer))
+    }
+
+    fn expression_statement(&mut self) -> Result<Stmt> {
+        let expr = self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
+        Ok(Stmt::new_expression(expr))
     }
 
     fn left_assoc_binary(
         &mut self,
-        lox: &mut Lox,
         operators: &[TokenType],
-        operand: fn(&mut Self, &mut Lox) -> Expr,
-    ) -> Expr {
-        let mut expr = operand(self, lox);
+        operand: fn(&mut Self) -> Result<Expr>,
+    ) -> Result<Expr> {
+        let mut expr = operand(self)?;
 
         while self.match_(operators) {
             let operator = self.previous();
-            let right = operand(self, lox);
+            let right = operand(self)?;
             expr = Expr::new_binary(Box::new(expr), operator, Box::new(right));
         }
 
-        expr
+        Ok(expr)
     }
 
-    fn equality(&mut self, lox: &mut Lox) -> Expr {
+    fn equality(&mut self) -> Result<Expr> {
         self.left_assoc_binary(
-            lox,
             &[TokenType::BangEqual, TokenType::EqualEqual],
             Self::comparison,
         )
     }
 
-    fn comparison(&mut self, lox: &mut Lox) -> Expr {
+    fn comparison(&mut self) -> Result<Expr> {
         self.left_assoc_binary(
-            lox,
             &[
                 TokenType::Greater,
                 TokenType::GreaterEqual,
@@ -81,38 +140,42 @@ impl Parser {
         )
     }
 
-    fn term(&mut self, lox: &mut Lox) -> Expr {
-        self.left_assoc_binary(lox, &[TokenType::Minus, TokenType::Plus], Self::factor)
+    fn term(&mut self) -> Result<Expr> {
+        self.left_assoc_binary(&[TokenType::Minus, TokenType::Plus], Self::factor)
     }
 
-    fn factor(&mut self, lox: &mut Lox) -> Expr {
-        self.left_assoc_binary(lox, &[TokenType::Slash, TokenType::Star], Self::unary)
+    fn factor(&mut self) -> Result<Expr> {
+        self.left_assoc_binary(&[TokenType::Slash, TokenType::Star], Self::unary)
     }
 
-    fn unary(&mut self, lox: &mut Lox) -> Expr {
+    fn unary(&mut self) -> Result<Expr> {
         if self.match_(&[TokenType::Minus, TokenType::Bang]) {
             let operator = self.previous();
-            let right = self.unary(lox);
-            return Expr::new_unary(operator, Box::new(right));
+            let right = self.unary()?;
+            return Ok(Expr::new_unary(operator, Box::new(right)));
         }
 
-        self.primary(lox)
+        self.primary()
     }
 
-    fn primary(&mut self, lox: &mut Lox) -> Expr {
+    fn primary(&mut self) -> Result<Expr> {
         self.advance();
         match self.previous().token_type {
-            TokenType::False => Expr::Literal(Literal::False),
-            TokenType::True => Expr::Literal(Literal::True),
-            TokenType::Nil => Expr::Literal(Literal::Nil),
-            TokenType::Number(n) => Expr::Literal(Literal::Number(n)),
-            TokenType::String(s) => Expr::Literal(Literal::String(s)),
+            TokenType::False => Ok(Expr::Literal(Literal::False)),
+            TokenType::True => Ok(Expr::Literal(Literal::True)),
+            TokenType::Nil => Ok(Expr::Literal(Literal::Nil)),
+            TokenType::Number(n) => Ok(Expr::Literal(Literal::Number(n))),
+            TokenType::String(s) => Ok(Expr::Literal(Literal::String(s))),
+            TokenType::Identifier(_) => Ok(Expr::new_variable(self.previous())),
             TokenType::LeftParen => {
-                let expr = self.expression(lox);
-                self.consume(lox, TokenType::RightParen, "Expect ')' after expression.");
-                Expr::new_grouping(Box::new(expr))
+                let expr = self.expression()?;
+                self.consume(TokenType::RightParen, "Expect ')' after expression.")?;
+                Ok(Expr::new_grouping(Box::new(expr)))
             }
-            _ => self.error(lox, self.peek(), "Expected expression."),
+            token_type => Err(Error {
+                message: format!("Expected expression, found `{token_type}`"),
+                line: self.previous().line,
+            }),
         }
     }
 
@@ -127,18 +190,29 @@ impl Parser {
         false
     }
 
-    fn consume(&mut self, lox: &mut Lox, token_type: TokenType, message: &str) -> Token {
-        if self.check(&token_type) {
-            return self.advance();
+    fn consume(&mut self, pred: impl TokenPred, message: &str) -> Result<Token> {
+        if self.check(&pred) {
+            Ok(self.advance())
+        } else {
+            Err(Error {
+                message: message.to_string(),
+                line: self.peek().line,
+            })
         }
-        self.error(lox, self.peek(), message);
     }
 
-    fn check(&self, token_type: &TokenType) -> bool {
+    fn consume_identifier(&mut self, message: &str) -> Result<Token> {
+        self.consume(
+            |t: &Token| matches!(t.token_type, TokenType::Identifier(_)),
+            message,
+        )
+    }
+
+    fn check(&self, pred: &impl TokenPred) -> bool {
         if self.is_at_end() {
             false
         } else {
-            self.peek().token_type == *token_type
+            pred.matches(&self.peek())
         }
     }
 
@@ -159,11 +233,6 @@ impl Parser {
 
     fn previous(&self) -> Token {
         self.tokens[self.current - 1].clone()
-    }
-
-    fn error(&self, lox: &mut Lox, token: Token, message: &str) -> ! {
-        lox.token_error(token, message);
-        panic!()
     }
 
     fn synchronize(&mut self) {
