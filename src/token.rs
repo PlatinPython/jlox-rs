@@ -52,7 +52,7 @@ pub(crate) enum TokenType {
 #[derive(Debug, Clone)]
 pub(crate) struct Token {
     token_type: TokenType,
-    lexeme: String,
+    pub(crate) lexeme: String,
     line: usize,
 }
 

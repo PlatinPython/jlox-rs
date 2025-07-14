@@ -1,6 +1,10 @@
-use crate::lox::Lox;
 use std::{env, process};
 
+use crate::expr::{AstPrinter, Expr, Literal};
+use crate::lox::Lox;
+use crate::token::{Token, TokenType};
+
+mod expr;
 mod lox;
 mod scanner;
 mod token;
@@ -16,4 +20,17 @@ fn main() {
     } else {
         Lox::new().run_prompt();
     }
+
+    let expr = Expr::new_binary(
+        Box::new(Expr::new_unary(
+            Token::new(TokenType::Minus, "-".to_string(), 1),
+            Box::new(Expr::Literal(Literal::Number(123f64))),
+        )),
+        Token::new(TokenType::Star, "*".to_string(), 1),
+        Box::new(Expr::new_grouping(Box::new(Expr::Literal(
+            Literal::Number(45.67),
+        )))),
+    );
+
+    println!("{}", AstPrinter.print(&expr));
 }

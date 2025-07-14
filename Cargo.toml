@@ -6,3 +6,4 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+paste = "1.0.15"
