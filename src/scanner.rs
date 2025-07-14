@@ -1,7 +1,7 @@
 use crate::lox::Lox;
 use crate::token::{Token, TokenType};
 
-pub(crate) struct Scanner {
+pub struct Scanner {
     source: String,
     tokens: Vec<Token>,
     start: usize,
@@ -10,7 +10,7 @@ pub(crate) struct Scanner {
 }
 
 impl Scanner {
-    pub(crate) fn new(source: String) -> Self {
+    pub fn new(source: String) -> Self {
         Self {
             source,
             tokens: Vec::new(),
@@ -20,7 +20,7 @@ impl Scanner {
         }
     }
 
-    pub(crate) fn scan_tokens(&mut self, lox: &mut Lox) -> Vec<Token> {
+    pub fn scan_tokens(&mut self, lox: &mut Lox) -> Vec<Token> {
         while !self.is_at_end() {
             self.start = self.current;
             self.scan_token(lox);

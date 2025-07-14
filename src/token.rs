@@ -1,5 +1,5 @@
 #[derive(Debug, Clone)]
-pub(crate) enum TokenType {
+pub enum TokenType {
     // Single-character tokens.
     LeftParen,
     RightParen,
@@ -50,14 +50,14 @@ pub(crate) enum TokenType {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Token {
+pub struct Token {
     token_type: TokenType,
-    pub(crate) lexeme: String,
+    pub lexeme: String,
     line: usize,
 }
 
 impl Token {
-    pub(crate) fn new(token_type: TokenType, lexeme: String, line: usize) -> Self {
+    pub fn new(token_type: TokenType, lexeme: String, line: usize) -> Self {
         Self {
             token_type,
             lexeme,

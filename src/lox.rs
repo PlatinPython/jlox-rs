@@ -1,18 +1,19 @@
-use crate::scanner::Scanner;
 use std::fs::File;
 use std::io::Read;
 use std::{io, process};
+
+use crate::scanner::Scanner;
 
 pub struct Lox {
     had_error: bool,
 }
 
 impl Lox {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self { had_error: false }
     }
 
-    pub(crate) fn run_file(&mut self, path: &str) {
+    pub fn run_file(&mut self, path: &str) {
         let mut buffer = String::new();
         File::open(path)
             .unwrap()
@@ -25,7 +26,7 @@ impl Lox {
         }
     }
 
-    pub(crate) fn run_prompt(&mut self) {
+    pub fn run_prompt(&mut self) {
         loop {
             print!("> ");
             let mut line = String::new();
@@ -46,7 +47,7 @@ impl Lox {
         }
     }
 
-    pub(crate) fn error(&mut self, line: usize, message: &str) {
+    pub fn error(&mut self, line: usize, message: &str) {
         self.report(line, "", message);
     }
 

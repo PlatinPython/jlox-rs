@@ -9,7 +9,7 @@ trait Walkable<V, T> {
 macro_rules! ast_impl {
     ($name:ident, struct, {$($field:ident: $field_type:ty),* $(,)?}) => {
         impl $name {
-            pub(crate) fn new($($field: $field_type),*) -> Self {
+            pub fn new($($field: $field_type),*) -> Self {
                 Self {
                     $($field),*
                 }
@@ -19,7 +19,7 @@ macro_rules! ast_impl {
     ($name:ident, enum, $block:tt) => {};
     ($name:ident, struct, s, {$($field:ident: $field_type:ty),* $(,)?}) => {
         paste!{
-            pub(crate) fn [<new_ $name:lower>]($($field: $field_type),*) -> Self {
+            pub fn [<new_ $name:lower>]($($field: $field_type),*) -> Self {
                 Self::$name($name::new($($field),*))
             }
         }
@@ -30,7 +30,7 @@ macro_rules! ast_impl {
 macro_rules! ast {
     ($base_name:ident {$($name:ident: $typ:ident $block:tt),* $(,)?}) => {
         #[derive(Debug, Clone)]
-        pub(crate) enum $base_name {
+        pub enum $base_name {
             $($name($name)),*
         }
 
@@ -40,7 +40,7 @@ macro_rules! ast {
 
         $(
             #[derive(Debug, Clone)]
-            pub(crate) $typ $name $block
+            pub $typ $name $block
 
             ast_impl!($name, $typ, $block);
         )*
@@ -95,10 +95,10 @@ macro_rules! parenthesize {
     };
 }
 
-pub(crate) struct AstPrinter;
+pub struct AstPrinter;
 
 impl AstPrinter {
-    pub(crate) fn print(&self, expr: &Expr) -> String {
+    pub fn print(&self, expr: &Expr) -> String {
         expr.walk(self)
     }
 }
