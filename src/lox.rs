@@ -55,13 +55,13 @@ impl Lox {
         let mut scanner = Scanner::new(source);
         let tokens = scanner.scan_tokens(self);
         let mut parser = Parser::new(tokens);
-        let expr = parser.parse(self);
+        let stmts = parser.parse(self);
 
         if self.had_error {
             return;
         }
 
-        interpreter.interpret(self, &expr)
+        interpreter.interpret(self, stmts)
     }
 
     pub fn error(&mut self, line: usize, message: &str) {

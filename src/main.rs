@@ -2,7 +2,7 @@ use std::{env, process};
 
 use crate::lox::Lox;
 
-mod expr;
+mod ast;
 mod interpreter;
 mod lox;
 mod parser;

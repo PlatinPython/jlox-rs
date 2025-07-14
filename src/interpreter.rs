@@ -1,6 +1,10 @@
 use std::cmp::PartialEq;
+use std::fmt::{Display, Formatter};
 
-use crate::expr::{Binary, Expr, Grouping, Literal, Unary, Visitor, Walkable};
+use crate::ast::{
+    Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor, Unary,
+    Walkable,
+};
 use crate::lox::Lox;
 use crate::token::{Token, TokenType};
 
@@ -18,6 +22,17 @@ impl Value {
     }
 }
 
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Nil => write!(f, "nil"),
+            Value::Bool(b) => b.fmt(f),
+            Value::Number(n) => n.fmt(f),
+            Value::String(s) => s.fmt(f),
+        }
+    }
+}
+
 pub struct Error {
     pub token: Token,
     pub message: &'static str,
@@ -28,21 +43,18 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct Interpreter;
 
 impl Interpreter {
-    pub fn interpret(&self, lox: &mut Lox, expr: &Expr) {
-        let value = self.evaluate(expr);
-        match value {
-            Ok(value) => match value {
-                Value::Nil => println!("nil"),
-                Value::Bool(b) => println!("{b}"),
-                Value::Number(n) => println!("{n}"),
-                Value::String(s) => println!("{s}"),
-            },
-            Err(error) => lox.runtime_error(error),
+    pub fn interpret(&self, lox: &mut Lox, stmts: Vec<Stmt>) {
+        if let Err(error) = stmts.iter().try_for_each(|stmt| self.execute(stmt)) {
+            lox.runtime_error(error);
         }
     }
 
     fn evaluate(&self, expr: &Expr) -> Result<Value> {
         expr.walk(self)
+    }
+
+    fn execute(&self, stmt: &Stmt) -> Result<()> {
+        stmt.walk(self)
     }
 
     fn error(&self, token: &Token, message: &'static str) -> Result<Value> {
@@ -53,7 +65,7 @@ impl Interpreter {
     }
 }
 
-impl Visitor<Result<Value>> for &Interpreter {
+impl ExprVisitor<Result<Value>> for &Interpreter {
     fn visit_binary(self, expr: &Binary) -> Result<Value> {
         let left = self.evaluate(&expr.left)?;
         let right = self.evaluate(&expr.right)?;
@@ -126,5 +138,17 @@ impl Visitor<Result<Value>> for &Interpreter {
             },
             _ => Ok(Value::Nil),
         }
+    }
+}
+
+impl StmtVisitor<Result<()>> for &Interpreter {
+    fn visit_expression(self, stmt: &Expression) -> Result<()> {
+        self.evaluate(&stmt.expr).map(|_| ())
+    }
+
+    fn visit_print(self, stmt: &Print) -> Result<()> {
+        let value = self.evaluate(&stmt.expr)?;
+        println!("{value}");
+        Ok(())
     }
 }

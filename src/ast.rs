@@ -18,7 +18,7 @@ macro_rules! ast_impl {
     };
     ($name:ident, enum, $block:tt) => {};
     ($name:ident, struct, s, {$($vis:vis $field:ident: $field_type:ty),* $(,)?}) => {
-        paste!{
+        paste! {
             pub fn [<new_ $name:lower>]($($field: $field_type),*) -> Self {
                 Self::$name($name::new($($field),*))
             }
@@ -28,40 +28,42 @@ macro_rules! ast_impl {
 }
 
 macro_rules! ast {
-    ($base_name:ident {$($name:ident: $typ:ident $block:tt),* $(,)?}) => {
-        #[derive(Debug, Clone)]
-        pub enum $base_name {
-            $($name($name)),*
-        }
-
-        impl $base_name {
-            $(ast_impl!($name, $typ, s, $block);)*
-        }
-
+    ($($base_name:ident {$($name:ident: $typ:ident $block:tt),* $(,)?}),* $(,)?) => {
         $(
             #[derive(Debug, Clone)]
-            pub $typ $name $block
-
-            ast_impl!($name, $typ, $block);
-        )*
-
-        pub trait Visitor<R> {
-            paste!{
-                $(fn [<visit_ $name:lower>](self, [<$base_name:lower>]: &$name) -> R;)*
+            pub enum $base_name {
+                $($name($name)),*
             }
-        }
 
-        impl<V: Visitor<T>, T> Walkable<V, T> for $base_name {
-            fn walk(&self, visitor: V) -> T {
-                paste!{
-                    match self {
-                        $(
-                            $base_name::$name(x) => visitor.[<visit_ $name:lower>](x)
-                        ),*
+            impl $base_name {
+                $(ast_impl!($name, $typ, s, $block);)*
+            }
+
+            $(
+                #[derive(Debug, Clone)]
+                pub $typ $name $block
+
+                ast_impl!($name, $typ, $block);
+            )*
+
+            paste! {
+                pub trait [<$base_name Visitor>]<R> {
+                    $(fn [<visit_ $name:lower>](self, [<$base_name:lower>]: &$name) -> R;)*
+                }
+            }
+
+            paste! {
+                impl<V: [<$base_name Visitor>]<T>, T> Walkable<V, T> for $base_name {
+                    fn walk(&self, visitor: V) -> T {
+                        match self {
+                            $(
+                                $base_name::$name(x) => visitor.[<visit_ $name:lower>](x)
+                            ),*
+                        }
                     }
                 }
             }
-        }
+        )*
     };
 }
 
@@ -86,7 +88,15 @@ ast! {
             pub operator: Token,
             pub right: Box<Expr>,
         },
-    }
+    },
+    Stmt {
+        Expression: struct {
+            pub expr: Expr,
+        },
+        Print: struct {
+            pub expr: Expr,
+        },
+    },
 }
 
 macro_rules! parenthesize {
@@ -103,7 +113,7 @@ impl AstPrinter {
     }
 }
 
-impl Visitor<String> for &AstPrinter {
+impl ExprVisitor<String> for &AstPrinter {
     fn visit_binary(self, expr: &Binary) -> String {
         parenthesize!(self, expr.operator.lexeme, expr.left, expr.right)
     }

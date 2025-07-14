@@ -1,4 +1,4 @@
-use crate::expr::{Expr, Literal};
+use crate::ast::{Expr, Literal, Stmt};
 use crate::lox::Lox;
 use crate::token::{Token, TokenType};
 
@@ -12,12 +12,35 @@ impl Parser {
         Self { tokens, current: 0 }
     }
 
-    pub fn parse(&mut self, lox: &mut Lox) -> Expr {
-        self.expression(lox)
+    pub fn parse(&mut self, lox: &mut Lox) -> Vec<Stmt> {
+        let mut stmts = vec![];
+        while !self.is_at_end() {
+            stmts.push(self.statement(lox));
+        }
+        stmts
     }
 
     fn expression(&mut self, lox: &mut Lox) -> Expr {
         self.equality(lox)
+    }
+
+    fn statement(&mut self, lox: &mut Lox) -> Stmt {
+        if self.match_(&[TokenType::Print]) {
+            return self.print_statement(lox);
+        }
+        self.expression_statement(lox)
+    }
+
+    fn print_statement(&mut self, lox: &mut Lox) -> Stmt {
+        let value = self.expression(lox);
+        self.consume(lox, TokenType::Semicolon, "Expect ';' after value.");
+        Stmt::new_print(value)
+    }
+
+    fn expression_statement(&mut self, lox: &mut Lox) -> Stmt {
+        let expr = self.expression(lox);
+        self.consume(lox, TokenType::Semicolon, "Expect ';' after expression.");
+        Stmt::new_expression(expr)
     }
 
     fn left_assoc_binary(
