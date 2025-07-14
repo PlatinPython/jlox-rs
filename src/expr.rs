@@ -2,12 +2,12 @@ use paste::paste;
 
 use crate::token::Token;
 
-trait Walkable<V, T> {
+pub trait Walkable<V, T> {
     fn walk(&self, visitor: V) -> T;
 }
 
 macro_rules! ast_impl {
-    ($name:ident, struct, {$($field:ident: $field_type:ty),* $(,)?}) => {
+    ($name:ident, struct, {$($vis:vis $field:ident: $field_type:ty),* $(,)?}) => {
         impl $name {
             pub fn new($($field: $field_type),*) -> Self {
                 Self {
@@ -17,7 +17,7 @@ macro_rules! ast_impl {
         }
     };
     ($name:ident, enum, $block:tt) => {};
-    ($name:ident, struct, s, {$($field:ident: $field_type:ty),* $(,)?}) => {
+    ($name:ident, struct, s, {$($vis:vis $field:ident: $field_type:ty),* $(,)?}) => {
         paste!{
             pub fn [<new_ $name:lower>]($($field: $field_type),*) -> Self {
                 Self::$name($name::new($($field),*))
@@ -45,7 +45,7 @@ macro_rules! ast {
             ast_impl!($name, $typ, $block);
         )*
 
-        trait Visitor<R> {
+        pub trait Visitor<R> {
             paste!{
                 $(fn [<visit_ $name:lower>](self, [<$base_name:lower>]: &$name) -> R;)*
             }
@@ -68,12 +68,12 @@ macro_rules! ast {
 ast! {
     Expr {
         Binary: struct {
-            left: Box<Expr>,
-            operator: Token,
-            right: Box<Expr>,
+            pub left: Box<Expr>,
+            pub operator: Token,
+            pub right: Box<Expr>,
         },
         Grouping: struct {
-            expr: Box<Expr>,
+            pub expr: Box<Expr>,
         },
         Literal: enum {
             String(String),
@@ -83,8 +83,8 @@ ast! {
             Nil,
         },
         Unary: struct {
-            operator: Token,
-            right: Box<Expr>,
+            pub operator: Token,
+            pub right: Box<Expr>,
         },
     }
 }
