@@ -2,7 +2,10 @@ use std::fs::File;
 use std::io::Read;
 use std::{io, process};
 
+use crate::expr::AstPrinter;
+use crate::parser::Parser;
 use crate::scanner::Scanner;
+use crate::token::{Token, TokenType};
 
 pub struct Lox {
     had_error: bool,
@@ -41,10 +44,14 @@ impl Lox {
     fn run(&mut self, source: String) {
         let mut scanner = Scanner::new(source);
         let tokens = scanner.scan_tokens(self);
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse(self);
 
-        for token in tokens {
-            println!("{:?}", token);
+        if self.had_error {
+            return;
         }
+
+        println!("{}", AstPrinter.print(&expr));
     }
 
     pub fn error(&mut self, line: usize, message: &str) {
@@ -52,7 +59,15 @@ impl Lox {
     }
 
     fn report(&mut self, line: usize, source: &str, message: &str) {
-        eprintln!("[line {}] Error{}: {}", line, source, message);
+        eprintln!("[line {line}] Error{source}: {message}");
         self.had_error = true;
+    }
+
+    pub fn token_error(&mut self, token: Token, message: &str) {
+        if token.token_type == TokenType::Eof {
+            self.report(token.line, " at end", message);
+        } else {
+            self.report(token.line, &format!(" at '{}'", token.lexeme), message);
+        }
     }
 }
