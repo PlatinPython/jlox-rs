@@ -39,18 +39,16 @@ pub struct Error {
     pub message: &'static str,
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T = Value> = std::result::Result<T, Error>;
 
 pub struct Interpreter;
 
 impl Interpreter {
-    pub fn interpret(&self, lox: &mut Lox, stmts: Vec<Stmt>) {
-        if let Err(error) = stmts.iter().try_for_each(|stmt| self.execute(stmt)) {
-            lox.runtime_error(error);
-        }
+    pub fn interpret(&self, lox: &mut Lox, stmts: Vec<Stmt>) -> Result<()> {
+        stmts.iter().try_for_each(|stmt| self.execute(stmt))
     }
 
-    fn evaluate(&self, expr: &Expr) -> Result<Value> {
+    fn evaluate(&self, expr: &Expr) -> Result {
         expr.walk(self)
     }
 
@@ -58,7 +56,7 @@ impl Interpreter {
         stmt.walk(self)
     }
 
-    fn error(&self, token: &Token, message: &'static str) -> Result<Value> {
+    fn error(&self, token: &Token, message: &'static str) -> Result {
         Err(Error {
             token: token.clone(),
             message,
@@ -66,8 +64,8 @@ impl Interpreter {
     }
 }
 
-impl ExprVisitor<Result<Value>> for &Interpreter {
-    fn visit_binary(self, expr: &Binary) -> Result<Value> {
+impl ExprVisitor<Result> for &Interpreter {
+    fn visit_binary(self, expr: &Binary) -> Result {
         let left = self.evaluate(&expr.left)?;
         let right = self.evaluate(&expr.right)?;
 
@@ -114,11 +112,11 @@ impl ExprVisitor<Result<Value>> for &Interpreter {
         }
     }
 
-    fn visit_grouping(self, expr: &Grouping) -> Result<Value> {
+    fn visit_grouping(self, expr: &Grouping) -> Result {
         self.evaluate(&expr.expr)
     }
 
-    fn visit_literal(self, expr: &Literal) -> Result<Value> {
+    fn visit_literal(self, expr: &Literal) -> Result {
         match expr {
             Literal::String(s) => Ok(Value::String(s.clone())),
             Literal::Number(n) => Ok(Value::Number(*n)),
@@ -128,7 +126,7 @@ impl ExprVisitor<Result<Value>> for &Interpreter {
         }
     }
 
-    fn visit_unary(self, expr: &Unary) -> Result<Value> {
+    fn visit_unary(self, expr: &Unary) -> Result {
         let right = self.evaluate(&expr.right)?;
 
         match expr.operator.token_type {
@@ -141,7 +139,7 @@ impl ExprVisitor<Result<Value>> for &Interpreter {
         }
     }
 
-    fn visit_variable(self, expr: &Variable) -> Result<Value> {
+    fn visit_variable(self, expr: &Variable) -> Result {
         todo!()
     }
 }

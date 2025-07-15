@@ -2,87 +2,58 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::{io, process};
 
-use crate::interpreter;
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::scanner::Scanner;
-use crate::token::{Token, TokenType};
+use crate::{interpreter, parser, scanner};
 
-pub struct Lox {
-    had_error: bool,
-    had_runtime_error: bool,
+#[derive(Debug)]
+pub enum Error {
+    Scanner(Vec<scanner::Error>),
+    Parser(Vec<parser::Error>),
+    Runtime(interpreter::Error),
+    Io(io::Error),
 }
+
+type Result<T = (), E = Error> = std::result::Result<T, E>;
+
+pub struct Lox;
 
 impl Lox {
     pub fn new() -> Self {
-        Self {
-            had_error: false,
-            had_runtime_error: false,
-        }
+        Self
     }
 
-    pub fn run_file(&mut self, path: &str) {
+    pub fn run_file(&mut self, path: &str) -> Result {
         let mut buffer = String::new();
-        File::open(path)
-            .unwrap()
+        File::open(path).map_err(Error::Io)?
             .read_to_string(&mut buffer)
-            .unwrap();
-        self.run(&mut Interpreter, buffer);
-
-        if self.had_error {
-            process::exit(65);
-        }
-        if self.had_runtime_error {
-            process::exit(70);
-        }
+            .map_err(Error::Io)?;
+        self.run(&mut Interpreter, buffer)
     }
 
-    pub fn run_prompt(&mut self) {
+    pub fn run_prompt(&mut self) -> Result {
         let mut interpreter = Interpreter;
         loop {
             print!("> ");
-            io::stdout().flush().unwrap();
+            io::stdout().flush().map_err(Error::Io)?;
             let mut line = String::new();
-            if io::stdin().read_line(&mut line).unwrap() == 0 {
+            if io::stdin().read_line(&mut line).map_err(Error::Io)? > 0 {
+                match self.run(&mut interpreter, line) {
+                    Ok(_) => {}
+                    Err(err) => eprintln!("{err:?}"),
+                }
+            } else {
                 break;
             }
-            self.run(&mut interpreter, line);
-            self.had_error = false;
         }
+        Ok(())
     }
 
-    fn run(&mut self, interpreter: &mut Interpreter, source: String) {
-        let mut scanner = Scanner::new(source);
-        let tokens = scanner.scan_tokens(self);
-        let mut parser = Parser::new(tokens);
-        let stmts = parser.parse().unwrap();
+    fn run(&mut self, interpreter: &mut Interpreter, source: String) -> Result {
+        let tokens = Scanner::new(source).scan_tokens().map_err(Error::Scanner)?;
+        let stmts = Parser::new(tokens).parse().map_err(Error::Parser)?;
 
-        if self.had_error {
-            return;
-        }
-
-        interpreter.interpret(self, stmts)
-    }
-
-    pub fn error(&mut self, line: usize, message: &str) {
-        self.report(line, "", message);
-    }
-
-    fn report(&mut self, line: usize, source: &str, message: &str) {
-        eprintln!("[line {line}] Error{source}: {message}");
-        self.had_error = true;
-    }
-
-    pub fn token_error(&mut self, token: Token, message: &str) {
-        if token.token_type == TokenType::Eof {
-            self.report(token.line, " at end", message);
-        } else {
-            self.report(token.line, &format!(" at '{}'", token.lexeme), message);
-        }
-    }
-
-    pub fn runtime_error(&mut self, error: interpreter::Error) {
-        eprintln!("{}\n[line {} ]", error.message, error.token.line);
-        self.had_runtime_error = true;
+        interpreter.interpret(self, stmts).map_err(Error::Runtime)
     }
 }
