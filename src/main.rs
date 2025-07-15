@@ -3,6 +3,7 @@ use std::{env, process};
 use crate::lox::{Error, Lox};
 
 mod ast;
+mod environment;
 mod interpreter;
 mod lox;
 mod parser;
@@ -11,7 +12,6 @@ mod token;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    #[allow(clippy::comparison_chain)]
     if args.len() > 2 {
         println!("Usage: {} [script]", args[0]);
         process::exit(64);

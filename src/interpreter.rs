@@ -5,11 +5,11 @@ use crate::ast::{
     Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor, Unary, Var,
     Variable, Walkable,
 };
-use crate::lox::Lox;
+use crate::environment::Environment;
 use crate::token::{Token, TokenType};
 
 #[derive(Debug, Clone, PartialEq)]
-enum Value {
+pub enum Value {
     Nil,
     Bool(bool),
     Number(f64),
@@ -36,15 +36,23 @@ impl Display for Value {
 #[derive(Debug)]
 pub struct Error {
     pub token: Token,
-    pub message: &'static str,
+    pub message: String,
 }
 
 type Result<T = Value> = std::result::Result<T, Error>;
 
-pub struct Interpreter;
+pub struct Interpreter {
+    environment: Environment,
+}
 
 impl Interpreter {
-    pub fn interpret(&self, lox: &mut Lox, stmts: Vec<Stmt>) -> Result<()> {
+    pub fn new() -> Interpreter {
+        Self {
+            environment: Environment::new(),
+        }
+    }
+
+    pub fn interpret(&mut self, stmts: Vec<Stmt>) -> Result<()> {
         stmts.iter().try_for_each(|stmt| self.execute(stmt))
     }
 
@@ -52,14 +60,14 @@ impl Interpreter {
         expr.walk(self)
     }
 
-    fn execute(&self, stmt: &Stmt) -> Result<()> {
+    fn execute(&mut self, stmt: &Stmt) -> Result<()> {
         stmt.walk(self)
     }
 
-    fn error(&self, token: &Token, message: &'static str) -> Result {
+    fn error(&self, token: &Token, message: &str) -> Result {
         Err(Error {
             token: token.clone(),
-            message,
+            message: message.to_string(),
         })
     }
 }
@@ -140,11 +148,14 @@ impl ExprVisitor<Result> for &Interpreter {
     }
 
     fn visit_variable(self, expr: &Variable) -> Result {
-        todo!()
+        self.environment.get(&expr.name).ok_or(Error {
+            token: expr.name.clone(),
+            message: format!("Undefined variable '{}'.", expr.name.lexeme),
+        })
     }
 }
 
-impl StmtVisitor<Result<()>> for &Interpreter {
+impl StmtVisitor<Result<()>> for &mut Interpreter {
     fn visit_expression(self, stmt: &Expression) -> Result<()> {
         self.evaluate(&stmt.expr).map(|_| ())
     }
@@ -156,6 +167,11 @@ impl StmtVisitor<Result<()>> for &Interpreter {
     }
 
     fn visit_var(self, stmt: &Var) -> Result<()> {
-        todo!()
+        let value = match &stmt.initializer {
+            Some(expr) => self.evaluate(expr)?,
+            None => Value::Nil,
+        };
+        self.environment.define(&stmt.name.lexeme, value);
+        Ok(())
     }
 }

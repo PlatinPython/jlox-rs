@@ -1,6 +1,6 @@
 use std::fs::File;
+use std::io;
 use std::io::{Read, Write};
-use std::{io, process};
 
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
@@ -26,14 +26,15 @@ impl Lox {
 
     pub fn run_file(&mut self, path: &str) -> Result {
         let mut buffer = String::new();
-        File::open(path).map_err(Error::Io)?
+        File::open(path)
+            .map_err(Error::Io)?
             .read_to_string(&mut buffer)
             .map_err(Error::Io)?;
-        self.run(&mut Interpreter, buffer)
+        self.run(&mut Interpreter::new(), buffer)
     }
 
     pub fn run_prompt(&mut self) -> Result {
-        let mut interpreter = Interpreter;
+        let mut interpreter = Interpreter::new();
         loop {
             print!("> ");
             io::stdout().flush().map_err(Error::Io)?;
@@ -54,6 +55,6 @@ impl Lox {
         let tokens = Scanner::new(source).scan_tokens().map_err(Error::Scanner)?;
         let stmts = Parser::new(tokens).parse().map_err(Error::Parser)?;
 
-        interpreter.interpret(self, stmts).map_err(Error::Runtime)
+        interpreter.interpret(stmts).map_err(Error::Runtime)
     }
 }
