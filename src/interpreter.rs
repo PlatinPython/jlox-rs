@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::time::SystemTime;
 
+use crate::ast;
 use crate::ast::{
     Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical,
     Print, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
@@ -13,14 +14,14 @@ use crate::token::{Token, TokenType};
 
 trait Callable {
     fn arity(&self) -> usize;
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Value;
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value>;
 }
 
 #[derive(Debug, Clone)]
 pub struct NativeFunction {
     pub name: String,
     pub arity: usize,
-    pub fun: fn(&mut Interpreter, Vec<Value>) -> Value,
+    pub fun: fn(&mut Interpreter, Vec<Value>) -> Result<Value>,
 }
 
 impl PartialEq for NativeFunction {
@@ -34,8 +35,29 @@ impl Callable for NativeFunction {
         self.arity
     }
 
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Value {
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value> {
         (self.fun)(interpreter, arguments)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Function {
+    pub declaration: ast::Function,
+}
+
+impl Callable for Function {
+    fn arity(&self) -> usize {
+        self.declaration.params.len()
+    }
+
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value> {
+        let mut environment = Environment::new_enclosing(interpreter.globals.clone());
+        for (param, arg) in self.declaration.params.iter().zip(arguments) {
+            environment.define(&param.lexeme, arg.clone());
+        }
+
+        interpreter.execute_block(&self.declaration.body, Rc::new(RefCell::new(environment)))?;
+        Ok(Value::Nil)
     }
 }
 
@@ -46,6 +68,7 @@ pub enum Value {
     Number(f64),
     String(String),
     NativeFunction(NativeFunction),
+    Function(Function),
 }
 
 impl Value {
@@ -62,6 +85,9 @@ impl Display for Value {
             Value::Number(n) => n.fmt(f),
             Value::String(s) => s.fmt(f),
             Value::NativeFunction(n) => write!(f, "<native fn {}>", n.name),
+            Value::Function(Function { declaration, .. }) => {
+                write!(f, "<fn {}>", declaration.name.lexeme)
+            }
         }
     }
 }
@@ -88,12 +114,12 @@ impl Interpreter {
                 name: "clock".to_string(),
                 arity: 0,
                 fun: |_, _| {
-                    Value::Number(
+                    Ok(Value::Number(
                         SystemTime::now()
                             .duration_since(SystemTime::UNIX_EPOCH)
                             .expect("System time is before unix epoch")
                             .as_secs_f64(),
-                    )
+                    ))
                 },
             }),
         );
@@ -209,6 +235,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
 
         let function: Box<dyn Callable> = match callee {
             Value::NativeFunction(n) => Box::new(n),
+            Value::Function(f) => Box::new(f),
             _ => return self.error(&expr.paren, "Can only call functions and classes."),
         };
 
@@ -223,7 +250,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
             );
         }
 
-        Ok(function.call(self, arguments))
+        function.call(self, arguments)
     }
 
     fn visit_grouping(self, expr: &Grouping) -> Result {
@@ -287,6 +314,16 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
 
     fn visit_expression(self, stmt: &Expression) -> Result<()> {
         self.evaluate(&stmt.expr).map(|_| ())
+    }
+
+    fn visit_function(self, stmt: &ast::Function) -> Result<()> {
+        let function = Value::Function(Function {
+            declaration: stmt.clone(),
+        });
+        self.environment
+            .borrow_mut()
+            .define(&stmt.name.lexeme, function);
+        Ok(())
     }
 
     fn visit_if(self, stmt: &If) -> Result<()> {

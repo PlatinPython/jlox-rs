@@ -30,7 +30,7 @@ macro_rules! ast_impl {
 macro_rules! ast {
     ($($base_name:ident {$($name:ident: $typ:ident $block:tt),* $(,)?}),* $(,)?) => {
         $(
-            #[derive(Debug, Clone)]
+            #[derive(Debug, Clone, PartialEq)]
             pub enum $base_name {
                 $($name($name)),*
             }
@@ -40,7 +40,7 @@ macro_rules! ast {
             }
 
             $(
-                #[derive(Debug, Clone)]
+                #[derive(Debug, Clone, PartialEq)]
                 pub $typ $name $block
 
                 ast_impl!($name, $typ, $block);
@@ -112,6 +112,11 @@ ast! {
         },
         Expression: struct {
             pub expr: Expr,
+        },
+        Function: struct {
+            pub name: Token,
+            pub params: Vec<Token>,
+            pub body: Vec<Stmt>,
         },
         If: struct {
             pub condition: Expr,

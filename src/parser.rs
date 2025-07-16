@@ -59,8 +59,10 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<Stmt> {
-        let res = if self.match_(&[TokenType::Var]) {
-            return self.var_declaration();
+        let res = if self.match_(&[TokenType::Fun]) {
+            self.function("function")
+        } else if self.match_(&[TokenType::Var]) {
+            self.var_declaration()
         } else {
             self.statement()
         };
@@ -180,6 +182,35 @@ impl Parser {
         Ok(Stmt::new_expression(expr))
     }
 
+    fn function(&mut self, kind: &str) -> Result<Stmt> {
+        let name = self.consume_identifier(&format!("Expect {kind} name."))?;
+        self.consume(
+            TokenType::LeftParen,
+            &format!("Expect '(' after {kind} name."),
+        )?;
+        let mut params = vec![];
+        if !self.check(&TokenType::RightParen) {
+            loop {
+                if params.len() >= 255 {
+                    return self.error(self.peek(), "Can't have more than 255 parameters.");
+                }
+
+                params.push(self.consume_identifier("Expect parameter name.")?);
+                if !self.match_(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
+
+        self.consume(
+            TokenType::LeftBrace,
+            &format!("Expect '{{' before {kind} body."),
+        )?;
+        let body = self.block()?;
+        Ok(Stmt::new_function(name, params, body))
+    }
+
     fn block(&mut self) -> Result<Vec<Stmt>> {
         let mut stmts = vec![];
 
@@ -201,10 +232,7 @@ impl Parser {
             if let Expr::Variable(var) = expr {
                 Ok(Expr::new_assign(var.name, Box::new(value)))
             } else {
-                Err(Error {
-                    message: "Invalid assignment target".to_string(),
-                    line: equals.line,
-                })
+                self.error(equals, "Invalid assignment target.")
             }
         } else {
             Ok(expr)
@@ -288,10 +316,7 @@ impl Parser {
         if !self.check(&TokenType::RightParen) {
             loop {
                 if arguments.len() >= 255 {
-                    return Err(Error {
-                        message: "Can't have more than 255 arguments".to_string(),
-                        line: self.peek().line,
-                    });
+                    return self.error(self.peek(), "Can't have more than 255 arguments");
                 }
                 arguments.push(self.expression()?);
                 if !self.match_(&[TokenType::Comma]) {
@@ -333,10 +358,10 @@ impl Parser {
                 self.consume(TokenType::RightParen, "Expect ')' after expression.")?;
                 Ok(Expr::new_grouping(Box::new(expr)))
             }
-            token_type => Err(Error {
-                message: format!("Expected expression, found `{token_type}`"),
-                line: self.previous().line,
-            }),
+            token_type => self.error(
+                self.previous(),
+                &format!("Expected expression, found `{token_type}`"),
+            ),
         }
     }
 
@@ -355,10 +380,7 @@ impl Parser {
         if self.check(&pred) {
             Ok(self.advance())
         } else {
-            Err(Error {
-                message: message.to_string(),
-                line: self.peek().line,
-            })
+            self.error(self.peek(), message)
         }
     }
 
@@ -394,6 +416,13 @@ impl Parser {
 
     fn previous(&self) -> Token {
         self.tokens[self.current - 1].clone()
+    }
+
+    fn error<T>(&self, token: Token, message: &str) -> Result<T> {
+        Err(Error {
+            message: message.to_string(),
+            line: token.line,
+        })
     }
 
     fn synchronize(&mut self) {
