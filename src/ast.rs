@@ -78,6 +78,11 @@ ast! {
             pub operator: Token,
             pub right: Box<Expr>,
         },
+        Call: struct {
+            pub callee: Box<Expr>,
+            pub paren: Token,
+            pub arguments: Vec<Expr>,
+        },
         Grouping: struct {
             pub expr: Box<Expr>,
         },

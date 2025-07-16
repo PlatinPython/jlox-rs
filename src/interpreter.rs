@@ -1,13 +1,43 @@
+use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::fmt::{Display, Formatter};
-use std::mem;
+use std::rc::Rc;
+use std::time::SystemTime;
 
 use crate::ast::{
-    Assign, Binary, Block, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical, Print,
-    Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
+    Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical,
+    Print, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
 };
 use crate::environment::Environment;
 use crate::token::{Token, TokenType};
+
+trait Callable {
+    fn arity(&self) -> usize;
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Value;
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeFunction {
+    pub name: String,
+    pub arity: usize,
+    pub fun: fn(&mut Interpreter, Vec<Value>) -> Value,
+}
+
+impl PartialEq for NativeFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Callable for NativeFunction {
+    fn arity(&self) -> usize {
+        self.arity
+    }
+
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Value {
+        (self.fun)(interpreter, arguments)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -15,6 +45,7 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
+    NativeFunction(NativeFunction),
 }
 
 impl Value {
@@ -30,6 +61,7 @@ impl Display for Value {
             Value::Bool(b) => b.fmt(f),
             Value::Number(n) => n.fmt(f),
             Value::String(s) => s.fmt(f),
+            Value::NativeFunction(n) => write!(f, "<native fn {}>", n.name),
         }
     }
 }
@@ -43,13 +75,31 @@ pub struct Error {
 type Result<T = Value> = std::result::Result<T, Error>;
 
 pub struct Interpreter {
-    environment: Environment,
+    globals: Rc<RefCell<Environment>>,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Interpreter {
+        let globals = Rc::new(RefCell::new(Environment::new()));
+        globals.borrow_mut().define(
+            "clock",
+            Value::NativeFunction(NativeFunction {
+                name: "clock".to_string(),
+                arity: 0,
+                fun: |_, _| {
+                    Value::Number(
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .expect("System time is before unix epoch")
+                            .as_secs_f64(),
+                    )
+                },
+            }),
+        );
         Self {
-            environment: Environment::new(),
+            globals: globals.clone(),
+            environment: globals.clone(),
         }
     }
 
@@ -65,12 +115,15 @@ impl Interpreter {
         stmt.walk(self)
     }
 
-    fn execute_block(&mut self, stmts: &[Stmt]) -> Result<()> {
-        self.environment = Environment::new_enclosing(mem::take(&mut self.environment));
+    fn execute_block(
+        &mut self,
+        stmts: &[Stmt],
+        environment: Rc<RefCell<Environment>>,
+    ) -> Result<()> {
+        let previous = self.environment.clone();
+        self.environment = environment;
         let result = stmts.iter().try_for_each(|stmt| self.execute(stmt));
-        self.environment = *mem::take(&mut self.environment)
-            .enclosing
-            .expect("This environment should have a parent.");
+        self.environment = previous;
         result
     }
 
@@ -85,7 +138,11 @@ impl Interpreter {
 impl ExprVisitor<Result> for &mut Interpreter {
     fn visit_assign(self, expr: &Assign) -> Result {
         let value = self.evaluate(&expr.value)?;
-        if !self.environment.assign(&expr.name, value.clone()) {
+        if !self
+            .environment
+            .borrow_mut()
+            .assign(&expr.name, value.clone())
+        {
             self.error(
                 &expr.name,
                 &format!("Undefined variable '{}'", expr.name.lexeme),
@@ -142,6 +199,33 @@ impl ExprVisitor<Result> for &mut Interpreter {
         }
     }
 
+    fn visit_call(self, expr: &Call) -> Result {
+        let callee = self.evaluate(&expr.callee)?;
+
+        let mut arguments = vec![];
+        for argument in &expr.arguments {
+            arguments.push(self.evaluate(argument)?);
+        }
+
+        let function: Box<dyn Callable> = match callee {
+            Value::NativeFunction(n) => Box::new(n),
+            _ => return self.error(&expr.paren, "Can only call functions and classes."),
+        };
+
+        if arguments.len() != function.arity() {
+            return self.error(
+                &expr.paren,
+                &format!(
+                    "Expected {} arguments but got {}.",
+                    function.arity(),
+                    arguments.len()
+                ),
+            );
+        }
+
+        Ok(function.call(self, arguments))
+    }
+
     fn visit_grouping(self, expr: &Grouping) -> Result {
         self.evaluate(&expr.expr)
     }
@@ -184,7 +268,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
     }
 
     fn visit_variable(self, expr: &Variable) -> Result {
-        self.environment.get(&expr.name).ok_or(Error {
+        self.environment.borrow().get(&expr.name).ok_or(Error {
             token: expr.name.clone(),
             message: format!("Undefined variable '{}'.", expr.name.lexeme),
         })
@@ -193,7 +277,12 @@ impl ExprVisitor<Result> for &mut Interpreter {
 
 impl StmtVisitor<Result<()>> for &mut Interpreter {
     fn visit_block(self, stmt: &Block) -> Result<()> {
-        self.execute_block(&stmt.stmts)
+        self.execute_block(
+            &stmt.stmts,
+            Rc::new(RefCell::new(Environment::new_enclosing(
+                self.environment.clone(),
+            ))),
+        )
     }
 
     fn visit_expression(self, stmt: &Expression) -> Result<()> {
@@ -220,7 +309,9 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
             Some(expr) => self.evaluate(expr)?,
             None => Value::Nil,
         };
-        self.environment.define(&stmt.name.lexeme, value);
+        self.environment
+            .borrow_mut()
+            .define(&stmt.name.lexeme, value);
         Ok(())
     }
 

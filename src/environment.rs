@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::interpreter::Value;
 use crate::token::Token;
@@ -6,7 +8,7 @@ use crate::token::Token;
 #[derive(Default)]
 pub struct Environment {
     values: HashMap<String, Value>,
-    pub enclosing: Option<Box<Environment>>,
+    pub enclosing: Option<Rc<RefCell<Environment>>>,
 }
 
 impl Environment {
@@ -17,10 +19,10 @@ impl Environment {
         }
     }
 
-    pub fn new_enclosing(enclosing: Environment) -> Environment {
+    pub fn new_enclosing(enclosing: Rc<RefCell<Environment>>) -> Environment {
         Self {
             values: HashMap::new(),
-            enclosing: Some(Box::new(enclosing)),
+            enclosing: Some(enclosing),
         }
     }
 
@@ -34,7 +36,7 @@ impl Environment {
             None => self
                 .enclosing
                 .as_ref()
-                .and_then(|enclosing| enclosing.get(name)),
+                .and_then(|enclosing| enclosing.borrow().get(name)),
         }
     }
 
@@ -43,7 +45,7 @@ impl Environment {
             return self
                 .enclosing
                 .as_mut()
-                .is_some_and(|enclosing| enclosing.assign(name, value));
+                .is_some_and(|enclosing| enclosing.borrow_mut().assign(name, value));
         }
 
         self.values.insert(name.lexeme.clone(), value);
