@@ -55,7 +55,7 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr> {
-        self.equality()
+        self.assignment()
     }
 
     fn declaration(&mut self) -> Result<Stmt> {
@@ -103,6 +103,26 @@ impl Parser {
         let expr = self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
         Ok(Stmt::new_expression(expr))
+    }
+
+    fn assignment(&mut self) -> Result<Expr> {
+        let expr = self.equality()?;
+
+        if self.match_(&[TokenType::Equal]) {
+            let equals = self.previous();
+            let value = self.assignment()?;
+
+            if let Expr::Variable(var) = expr {
+                Ok(Expr::new_assign(var.name, Box::new(value)))
+            } else {
+                Err(Error {
+                    message: "Invalid assignment target".to_string(),
+                    line: equals.line,
+                })
+            }
+        } else {
+            Ok(expr)
+        }
     }
 
     fn left_assoc_binary(

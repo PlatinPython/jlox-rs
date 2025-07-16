@@ -2,8 +2,8 @@ use std::cmp::PartialEq;
 use std::fmt::{Display, Formatter};
 
 use crate::ast::{
-    Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor, Unary, Var,
-    Variable, Walkable,
+    Assign, Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor,
+    Unary, Var, Variable, Walkable,
 };
 use crate::environment::Environment;
 use crate::token::{Token, TokenType};
@@ -56,7 +56,7 @@ impl Interpreter {
         stmts.iter().try_for_each(|stmt| self.execute(stmt))
     }
 
-    fn evaluate(&self, expr: &Expr) -> Result {
+    fn evaluate(&mut self, expr: &Expr) -> Result {
         expr.walk(self)
     }
 
@@ -72,7 +72,19 @@ impl Interpreter {
     }
 }
 
-impl ExprVisitor<Result> for &Interpreter {
+impl ExprVisitor<Result> for &mut Interpreter {
+    fn visit_assign(self, expr: &Assign) -> Result {
+        let value = self.evaluate(&expr.value)?;
+        if !self.environment.assign(&expr.name, value.clone()) {
+            self.error(
+                &expr.name,
+                &format!("Undefined variable '{}'", expr.name.lexeme),
+            )
+        } else {
+            Ok(value)
+        }
+    }
+
     fn visit_binary(self, expr: &Binary) -> Result {
         let left = self.evaluate(&expr.left)?;
         let right = self.evaluate(&expr.right)?;

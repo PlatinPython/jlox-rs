@@ -69,6 +69,10 @@ macro_rules! ast {
 
 ast! {
     Expr {
+        Assign: struct {
+            pub name: Token,
+            pub value: Box<Expr>,
+        },
         Binary: struct {
             pub left: Box<Expr>,
             pub operator: Token,
