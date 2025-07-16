@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use crate::interpreter::Value;
 use crate::token::Token;
 
-#[derive(Clone)]
+#[derive(Default)]
 pub struct Environment {
     values: HashMap<String, Value>,
-    enclosing: Option<Box<Environment>>,
+    pub enclosing: Option<Box<Environment>>,
 }
 
 impl Environment {

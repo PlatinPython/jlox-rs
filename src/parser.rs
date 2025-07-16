@@ -71,12 +71,76 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt> {
-        if self.match_(&[TokenType::Print]) {
-            return self.print_statement();
+        if self.match_(&[TokenType::For]) {
+            self.for_statement()
+        } else if self.match_(&[TokenType::If]) {
+            self.if_statement()
+        } else if self.match_(&[TokenType::Print]) {
+            self.print_statement()
+        } else if self.match_(&[TokenType::While]) {
+            self.while_statement()
         } else if self.match_(&[TokenType::LeftBrace]) {
-            return Ok(Stmt::new_block(self.block()?));
+            Ok(Stmt::new_block(self.block()?))
+        } else {
+            self.expression_statement()
         }
-        self.expression_statement()
+    }
+
+    fn for_statement(&mut self) -> Result<Stmt> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
+
+        let initializer = if self.match_(&[TokenType::Semicolon]) {
+            None
+        } else if self.match_(&[TokenType::Var]) {
+            Some(self.var_declaration()?)
+        } else {
+            Some(self.expression_statement()?)
+        };
+
+        let condition = if !self.check(&TokenType::Semicolon) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.consume(TokenType::Semicolon, "Expect ';' after loop condition.")?;
+
+        let increment = if !self.check(&TokenType::RightParen) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
+        let mut body = self.statement()?;
+
+        if let Some(increment) = increment {
+            body = Stmt::new_block(vec![body, Stmt::new_expression(increment)]);
+        }
+
+        body = Stmt::new_while(
+            condition.unwrap_or(Expr::Literal(Literal::True)),
+            Box::new(body),
+        );
+
+        if let Some(initializer) = initializer {
+            body = Stmt::new_block(vec![initializer, body]);
+        }
+
+        Ok(body)
+    }
+
+    fn if_statement(&mut self) -> Result<Stmt> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after if condition.")?;
+
+        let then_branch = self.statement()?;
+        let else_branch = if self.match_(&[TokenType::Else]) {
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+
+        Ok(Stmt::new_if(condition, Box::new(then_branch), else_branch))
     }
 
     fn print_statement(&mut self) -> Result<Stmt> {
@@ -101,6 +165,15 @@ impl Parser {
         Ok(Stmt::new_var(name, initializer))
     }
 
+    fn while_statement(&mut self) -> Result<Stmt> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after condition.")?;
+        let body = self.statement()?;
+
+        Ok(Stmt::new_while(condition, Box::new(body)))
+    }
+
     fn expression_statement(&mut self) -> Result<Stmt> {
         let expr = self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
@@ -119,7 +192,7 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> Result<Expr> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
 
         if self.match_(&[TokenType::Equal]) {
             let equals = self.previous();
@@ -142,22 +215,32 @@ impl Parser {
         &mut self,
         operators: &[TokenType],
         operand: fn(&mut Self) -> Result<Expr>,
+        expr_type: fn(Box<Expr>, Token, Box<Expr>) -> Expr,
     ) -> Result<Expr> {
         let mut expr = operand(self)?;
 
         while self.match_(operators) {
             let operator = self.previous();
             let right = operand(self)?;
-            expr = Expr::new_binary(Box::new(expr), operator, Box::new(right));
+            expr = expr_type(Box::new(expr), operator, Box::new(right));
         }
 
         Ok(expr)
+    }
+
+    fn or(&mut self) -> Result<Expr> {
+        self.left_assoc_binary(&[TokenType::Or], Self::and, Expr::new_logical)
+    }
+
+    fn and(&mut self) -> Result<Expr> {
+        self.left_assoc_binary(&[TokenType::And], Self::equality, Expr::new_logical)
     }
 
     fn equality(&mut self) -> Result<Expr> {
         self.left_assoc_binary(
             &[TokenType::BangEqual, TokenType::EqualEqual],
             Self::comparison,
+            Expr::new_binary,
         )
     }
 
@@ -170,15 +253,24 @@ impl Parser {
                 TokenType::LessEqual,
             ],
             Self::term,
+            Expr::new_binary,
         )
     }
 
     fn term(&mut self) -> Result<Expr> {
-        self.left_assoc_binary(&[TokenType::Minus, TokenType::Plus], Self::factor)
+        self.left_assoc_binary(
+            &[TokenType::Minus, TokenType::Plus],
+            Self::factor,
+            Expr::new_binary,
+        )
     }
 
     fn factor(&mut self) -> Result<Expr> {
-        self.left_assoc_binary(&[TokenType::Slash, TokenType::Star], Self::unary)
+        self.left_assoc_binary(
+            &[TokenType::Slash, TokenType::Star],
+            Self::unary,
+            Expr::new_binary,
+        )
     }
 
     fn unary(&mut self) -> Result<Expr> {

@@ -3,8 +3,8 @@ use std::fmt::{Display, Formatter};
 use std::mem;
 
 use crate::ast::{
-    Assign, Binary, Block, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt,
-    StmtVisitor, Unary, Var, Variable, Walkable,
+    Assign, Binary, Block, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical, Print,
+    Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
 };
 use crate::environment::Environment;
 use crate::token::{Token, TokenType};
@@ -65,10 +65,12 @@ impl Interpreter {
         stmt.walk(self)
     }
 
-    fn execute_block(&mut self, stmts: &[Stmt], environment: Environment) -> Result<()> {
-        let previous = mem::replace(&mut self.environment, environment);
+    fn execute_block(&mut self, stmts: &[Stmt]) -> Result<()> {
+        self.environment = Environment::new_enclosing(mem::take(&mut self.environment));
         let result = stmts.iter().try_for_each(|stmt| self.execute(stmt));
-        self.environment = previous;
+        self.environment = *mem::take(&mut self.environment)
+            .enclosing
+            .expect("This environment should have a parent.");
         result
     }
 
@@ -154,6 +156,20 @@ impl ExprVisitor<Result> for &mut Interpreter {
         }
     }
 
+    fn visit_logical(self, expr: &Logical) -> Result {
+        let left = self.evaluate(&expr.left)?;
+
+        if expr.operator.token_type == TokenType::Or {
+            if left.is_truthy() {
+                return Ok(left);
+            }
+        } else if !left.is_truthy() {
+            return Ok(left);
+        }
+
+        self.evaluate(&expr.right)
+    }
+
     fn visit_unary(self, expr: &Unary) -> Result {
         let right = self.evaluate(&expr.right)?;
 
@@ -177,14 +193,20 @@ impl ExprVisitor<Result> for &mut Interpreter {
 
 impl StmtVisitor<Result<()>> for &mut Interpreter {
     fn visit_block(self, stmt: &Block) -> Result<()> {
-        self.execute_block(
-            &stmt.stmts,
-            Environment::new_enclosing(self.environment.clone()),
-        )
+        self.execute_block(&stmt.stmts)
     }
 
     fn visit_expression(self, stmt: &Expression) -> Result<()> {
         self.evaluate(&stmt.expr).map(|_| ())
+    }
+
+    fn visit_if(self, stmt: &If) -> Result<()> {
+        if self.evaluate(&stmt.condition)?.is_truthy() {
+            self.execute(&stmt.then_branch)?;
+        } else if let Some(else_branch) = &stmt.else_branch {
+            self.execute(else_branch)?;
+        }
+        Ok(())
     }
 
     fn visit_print(self, stmt: &Print) -> Result<()> {
@@ -199,6 +221,13 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
             None => Value::Nil,
         };
         self.environment.define(&stmt.name.lexeme, value);
+        Ok(())
+    }
+
+    fn visit_while(self, stmt: &While) -> Result<()> {
+        while self.evaluate(&stmt.condition)?.is_truthy() {
+            self.execute(&stmt.body)?;
+        }
         Ok(())
     }
 }

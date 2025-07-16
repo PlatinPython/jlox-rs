@@ -88,6 +88,11 @@ ast! {
             False,
             Nil,
         },
+        Logical: struct {
+            pub left: Box<Expr>,
+            pub operator: Token,
+            pub right: Box<Expr>,
+        },
         Unary: struct {
             pub operator: Token,
             pub right: Box<Expr>,
@@ -103,12 +108,21 @@ ast! {
         Expression: struct {
             pub expr: Expr,
         },
+        If: struct {
+            pub condition: Expr,
+            pub then_branch: Box<Stmt>,
+            pub else_branch: Option<Box<Stmt>>,
+        },
         Print: struct {
             pub expr: Expr,
         },
         Var: struct {
             pub name: Token,
             pub initializer: Option<Expr>,
+        },
+        While: struct {
+            pub condition: Expr,
+            pub body: Box<Stmt>,
         },
     },
 }
