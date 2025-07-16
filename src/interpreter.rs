@@ -1,9 +1,10 @@
 use std::cmp::PartialEq;
 use std::fmt::{Display, Formatter};
+use std::mem;
 
 use crate::ast::{
-    Assign, Binary, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt, StmtVisitor,
-    Unary, Var, Variable, Walkable,
+    Assign, Binary, Block, Expr, ExprVisitor, Expression, Grouping, Literal, Print, Stmt,
+    StmtVisitor, Unary, Var, Variable, Walkable,
 };
 use crate::environment::Environment;
 use crate::token::{Token, TokenType};
@@ -62,6 +63,13 @@ impl Interpreter {
 
     fn execute(&mut self, stmt: &Stmt) -> Result<()> {
         stmt.walk(self)
+    }
+
+    fn execute_block(&mut self, stmts: &[Stmt], environment: Environment) -> Result<()> {
+        let previous = mem::replace(&mut self.environment, environment);
+        let result = stmts.iter().try_for_each(|stmt| self.execute(stmt));
+        self.environment = previous;
+        result
     }
 
     fn error(&self, token: &Token, message: &str) -> Result {
@@ -168,6 +176,13 @@ impl ExprVisitor<Result> for &mut Interpreter {
 }
 
 impl StmtVisitor<Result<()>> for &mut Interpreter {
+    fn visit_block(self, stmt: &Block) -> Result<()> {
+        self.execute_block(
+            &stmt.stmts,
+            Environment::new_enclosing(self.environment.clone()),
+        )
+    }
+
     fn visit_expression(self, stmt: &Expression) -> Result<()> {
         self.evaluate(&stmt.expr).map(|_| ())
     }

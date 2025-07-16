@@ -97,6 +97,9 @@ ast! {
         },
     },
     Stmt {
+        Block: struct {
+            pub stmts: Vec<Stmt>,
+        },
         Expression: struct {
             pub expr: Expr,
         },
