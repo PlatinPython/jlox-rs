@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::interpreter::Value;
 use crate::token::Token;
 
-#[derive(Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Environment {
     values: HashMap<String, Value>,
     pub enclosing: Option<Rc<RefCell<Environment>>>,

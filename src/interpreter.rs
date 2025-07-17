@@ -43,6 +43,7 @@ impl Callable for NativeFunction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub declaration: ast::Function,
+    pub closure: Rc<RefCell<Environment>>,
 }
 
 impl Callable for Function {
@@ -51,7 +52,7 @@ impl Callable for Function {
     }
 
     fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value> {
-        let mut environment = Environment::new_enclosing(interpreter.globals.clone());
+        let mut environment = Environment::new_enclosing(self.closure.clone());
         for (param, arg) in self.declaration.params.iter().zip(arguments) {
             environment.define(&param.lexeme, arg.clone());
         }
@@ -326,6 +327,7 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
     fn visit_function(self, stmt: &ast::Function) -> Result<()> {
         let function = Value::Function(Function {
             declaration: stmt.clone(),
+            closure: self.environment.clone(),
         });
         self.environment
             .borrow_mut()
