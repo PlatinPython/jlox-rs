@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::ast;
 use crate::ast::{
     Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical,
-    Print, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
+    Print, Return, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
 };
 use crate::environment::Environment;
 use crate::token::{Token, TokenType};
@@ -56,8 +56,12 @@ impl Callable for Function {
             environment.define(&param.lexeme, arg.clone());
         }
 
-        interpreter.execute_block(&self.declaration.body, Rc::new(RefCell::new(environment)))?;
-        Ok(Value::Nil)
+        match interpreter.execute_block(&self.declaration.body, Rc::new(RefCell::new(environment)))
+        {
+            Err(Error::Return { value }) => Ok(value),
+            Err(err) => Err(err),
+            _ => Ok(Value::Nil),
+        }
     }
 }
 
@@ -93,9 +97,9 @@ impl Display for Value {
 }
 
 #[derive(Debug)]
-pub struct Error {
-    pub token: Token,
-    pub message: String,
+pub enum Error {
+    Error { token: Token, message: String },
+    Return { value: Value },
 }
 
 type Result<T = Value> = std::result::Result<T, Error>;
@@ -154,7 +158,7 @@ impl Interpreter {
     }
 
     fn error(&self, token: &Token, message: &str) -> Result {
-        Err(Error {
+        Err(Error::Error {
             token: token.clone(),
             message: message.to_string(),
         })
@@ -295,10 +299,13 @@ impl ExprVisitor<Result> for &mut Interpreter {
     }
 
     fn visit_variable(self, expr: &Variable) -> Result {
-        self.environment.borrow().get(&expr.name).ok_or(Error {
-            token: expr.name.clone(),
-            message: format!("Undefined variable '{}'.", expr.name.lexeme),
-        })
+        self.environment
+            .borrow()
+            .get(&expr.name)
+            .ok_or(Error::Error {
+                token: expr.name.clone(),
+                message: format!("Undefined variable '{}'.", expr.name.lexeme),
+            })
     }
 }
 
@@ -339,6 +346,16 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
         let value = self.evaluate(&stmt.expr)?;
         println!("{value}");
         Ok(())
+    }
+
+    fn visit_return(self, stmt: &Return) -> Result<()> {
+        let value = if let Some(value) = &stmt.value {
+            self.evaluate(value)?
+        } else {
+            Value::Nil
+        };
+
+        Err(Error::Return { value })
     }
 
     fn visit_var(self, stmt: &Var) -> Result<()> {

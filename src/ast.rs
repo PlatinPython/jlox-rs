@@ -126,6 +126,10 @@ ast! {
         Print: struct {
             pub expr: Expr,
         },
+        Return: struct {
+            pub keyword: Token,
+            pub value: Option<Expr>,
+        },
         Var: struct {
             pub name: Token,
             pub initializer: Option<Expr>,
