@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, PartialEq)]
+use ordered_float::OrderedFloat;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TokenType {
     // Single-character tokens.
     LeftParen,
@@ -28,7 +30,7 @@ pub enum TokenType {
     // Literals.
     Identifier(String),
     String(String),
-    Number(f64),
+    Number(OrderedFloat<f64>),
 
     // Keywords.
     And,
@@ -51,7 +53,7 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,

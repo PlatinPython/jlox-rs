@@ -1,3 +1,4 @@
+use ordered_float::OrderedFloat;
 use paste::paste;
 
 use crate::token::Token;
@@ -30,7 +31,7 @@ macro_rules! ast_impl {
 macro_rules! ast {
     ($($base_name:ident {$($name:ident: $typ:ident $block:tt),* $(,)?}),* $(,)?) => {
         $(
-            #[derive(Debug, Clone, PartialEq)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash)]
             pub enum $base_name {
                 $($name($name)),*
             }
@@ -40,7 +41,7 @@ macro_rules! ast {
             }
 
             $(
-                #[derive(Debug, Clone, PartialEq)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash)]
                 pub $typ $name $block
 
                 ast_impl!($name, $typ, $block);
@@ -88,7 +89,7 @@ ast! {
         },
         Literal: enum {
             String(String),
-            Number(f64),
+            Number(OrderedFloat<f64>),
             True,
             False,
             Nil,

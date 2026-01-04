@@ -40,15 +40,50 @@ impl Environment {
         }
     }
 
-    pub fn assign(&mut self, name: &Token, value: Value) -> bool {
+    pub fn assign(&mut self, name: &Token, value: Value) -> Option<Value> {
         if !self.values.contains_key(&name.lexeme) {
             return self
                 .enclosing
                 .as_mut()
-                .is_some_and(|enclosing| enclosing.borrow_mut().assign(name, value));
+                .and_then(|enclosing| enclosing.borrow_mut().assign(name, value));
         }
 
-        self.values.insert(name.lexeme.clone(), value);
-        true
+        self.values.insert(name.lexeme.clone(), value.clone());
+        Some(value)
+    }
+
+    fn ancestor(
+        environment: Rc<RefCell<Environment>>,
+        distance: usize,
+    ) -> Option<Rc<RefCell<Environment>>> {
+        let mut current = environment;
+        for _ in 0..distance {
+            let next = current.borrow().enclosing.clone()?;
+            current = next;
+        }
+        Some(current)
+    }
+}
+
+pub trait EnvironmentExt {
+    fn get_at(&self, distance: usize, name: &Token) -> Option<Value>;
+    fn assign_at(&mut self, distance: usize, name: &Token, value: Value) -> Option<Value>;
+}
+
+impl EnvironmentExt for Rc<RefCell<Environment>> {
+    fn get_at(&self, distance: usize, name: &Token) -> Option<Value> {
+        Environment::ancestor(self.clone(), distance)?
+            .borrow()
+            .values
+            .get(&name.lexeme)
+            .cloned()
+    }
+
+    fn assign_at(&mut self, distance: usize, name: &Token, value: Value) -> Option<Value> {
+        Environment::ancestor(self.clone(), distance)?
+            .borrow_mut()
+            .values
+            .insert(name.lexeme.clone(), value.clone());
+        Some(value)
     }
 }

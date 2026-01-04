@@ -4,13 +4,15 @@ use std::io::{Read, Write};
 
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
+use crate::resolver::Resolver;
 use crate::scanner::Scanner;
-use crate::{interpreter, parser, scanner};
+use crate::{interpreter, parser, resolver, scanner};
 
 #[derive(Debug)]
 pub enum Error {
     Scanner(Vec<scanner::Error>),
     Parser(Vec<parser::Error>),
+    Resolver(Vec<resolver::Error>),
     Runtime(interpreter::Error),
     Io(io::Error),
 }
@@ -54,6 +56,10 @@ impl Lox {
     fn run(&mut self, interpreter: &mut Interpreter, source: String) -> Result {
         let tokens = Scanner::new(source).scan_tokens().map_err(Error::Scanner)?;
         let stmts = Parser::new(tokens).parse().map_err(Error::Parser)?;
+
+        Resolver::new(interpreter)
+            .resolve(&stmts)
+            .map_err(Error::Resolver)?;
 
         interpreter.interpret(stmts).map_err(Error::Runtime)
     }

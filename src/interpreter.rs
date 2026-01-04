@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::cmp::PartialEq;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::time::SystemTime;
@@ -9,7 +10,7 @@ use crate::ast::{
     Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical,
     Print, Return, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
 };
-use crate::environment::Environment;
+use crate::environment::{Environment, EnvironmentExt};
 use crate::token::{Token, TokenType};
 
 trait Callable {
@@ -108,6 +109,7 @@ type Result<T = Value> = std::result::Result<T, Error>;
 pub struct Interpreter {
     globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
+    locals: HashMap<Expr, usize>,
 }
 
 impl Interpreter {
@@ -131,6 +133,7 @@ impl Interpreter {
         Self {
             globals: globals.clone(),
             environment: globals.clone(),
+            locals: HashMap::new(),
         }
     }
 
@@ -158,6 +161,10 @@ impl Interpreter {
         result
     }
 
+    pub fn resolve(&mut self, expr: &Expr, depth: usize) {
+        self.locals.insert(expr.clone(), depth);
+    }
+
     fn error(&self, token: &Token, message: &str) -> Result {
         Err(Error::Error {
             token: token.clone(),
@@ -169,18 +176,14 @@ impl Interpreter {
 impl ExprVisitor<Result> for &mut Interpreter {
     fn visit_assign(self, expr: &Assign) -> Result {
         let value = self.evaluate(&expr.value)?;
-        if !self
-            .environment
-            .borrow_mut()
-            .assign(&expr.name, value.clone())
-        {
-            self.error(
-                &expr.name,
-                &format!("Undefined variable '{}'", expr.name.lexeme),
-            )
-        } else {
-            Ok(value)
+        match self.locals.get(&Expr::Assign(expr.clone())) {
+            Some(distance) => self.environment.assign_at(*distance, &expr.name, value),
+            None => self.globals.borrow_mut().assign(&expr.name, value),
         }
+        .ok_or(Error::Error {
+            token: expr.name.clone(),
+            message: format!("Undefined variable '{}'.", expr.name.lexeme),
+        })
     }
 
     fn visit_binary(self, expr: &Binary) -> Result {
@@ -265,7 +268,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
     fn visit_literal(self, expr: &Literal) -> Result {
         match expr {
             Literal::String(s) => Ok(Value::String(s.clone())),
-            Literal::Number(n) => Ok(Value::Number(*n)),
+            Literal::Number(n) => Ok(Value::Number(n.0)),
             Literal::True => Ok(Value::Bool(true)),
             Literal::False => Ok(Value::Bool(false)),
             Literal::Nil => Ok(Value::Nil),
@@ -300,13 +303,14 @@ impl ExprVisitor<Result> for &mut Interpreter {
     }
 
     fn visit_variable(self, expr: &Variable) -> Result {
-        self.environment
-            .borrow()
-            .get(&expr.name)
-            .ok_or(Error::Error {
-                token: expr.name.clone(),
-                message: format!("Undefined variable '{}'.", expr.name.lexeme),
-            })
+        match self.locals.get(&Expr::Variable(expr.clone())) {
+            Some(distance) => self.environment.get_at(*distance, &expr.name),
+            None => self.globals.borrow().get(&expr.name),
+        }
+        .ok_or(Error::Error {
+            token: expr.name.clone(),
+            message: format!("Undefined variable '{}'.", expr.name.lexeme),
+        })
     }
 }
 
