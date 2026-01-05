@@ -20,6 +20,7 @@ macro_rules! ast_impl {
     ($name:ident, enum, $block:tt) => {};
     ($name:ident, struct, s, {$($vis:vis $field:ident: $field_type:ty),* $(,)?}) => {
         paste! {
+            #[allow(dead_code)]
             pub fn [<new_ $name:lower>]($($field: $field_type),*) -> Self {
                 Self::$name($name::new($($field),*))
             }
@@ -84,6 +85,10 @@ ast! {
             pub paren: Token,
             pub arguments: Vec<Expr>,
         },
+        Get: struct {
+            pub object: Box<Expr>,
+            pub name: Token,
+        },
         Grouping: struct {
             pub expr: Box<Expr>,
         },
@@ -99,6 +104,14 @@ ast! {
             pub operator: Token,
             pub right: Box<Expr>,
         },
+        Set: struct {
+            pub object: Box<Expr>,
+            pub name: Token,
+            pub value: Box<Expr>,
+        },
+        This: struct {
+            pub keyword: Token,
+        },
         Unary: struct {
             pub operator: Token,
             pub right: Box<Expr>,
@@ -110,6 +123,10 @@ ast! {
     Stmt {
         Block: struct {
             pub stmts: Vec<Stmt>,
+        },
+        Class: struct {
+            pub name: Token,
+            pub methods: Vec<Function>,
         },
         Expression: struct {
             pub expr: Expr,

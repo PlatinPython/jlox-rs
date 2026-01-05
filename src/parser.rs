@@ -1,6 +1,7 @@
-use crate::ast::{Expr, Literal, Stmt};
+use crate::ast::{Expr, Function, Literal, Stmt};
 use crate::token::{Token, TokenType};
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Error {
     message: String,
@@ -59,8 +60,10 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<Stmt> {
-        let res = if self.match_(&[TokenType::Fun]) {
-            self.function("function")
+        let res = if self.match_(&[TokenType::Class]) {
+            self.class_declaration()
+        } else if self.match_(&[TokenType::Fun]) {
+            self.function("function").map(Stmt::Function)
         } else if self.match_(&[TokenType::Var]) {
             self.var_declaration()
         } else {
@@ -70,6 +73,21 @@ impl Parser {
             self.synchronize();
         }
         res
+    }
+
+    fn class_declaration(&mut self) -> Result<Stmt> {
+        let name = self.consume_identifier("Expect class name.")?;
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+
+        let mut methods = vec![];
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.function("method")?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+        Ok(Stmt::new_class(name, methods))
     }
 
     fn statement(&mut self) -> Result<Stmt> {
@@ -196,7 +214,7 @@ impl Parser {
         Ok(Stmt::new_expression(expr))
     }
 
-    fn function(&mut self, kind: &str) -> Result<Stmt> {
+    fn function(&mut self, kind: &str) -> Result<Function> {
         let name = self.consume_identifier(&format!("Expect {kind} name."))?;
         self.consume(
             TokenType::LeftParen,
@@ -222,7 +240,7 @@ impl Parser {
             &format!("Expect '{{' before {kind} body."),
         )?;
         let body = self.block()?;
-        Ok(Stmt::new_function(name, params, body))
+        Ok(Function { name, params, body })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>> {
@@ -243,10 +261,10 @@ impl Parser {
             let equals = self.previous();
             let value = self.assignment()?;
 
-            if let Expr::Variable(var) = expr {
-                Ok(Expr::new_assign(var.name, Box::new(value)))
-            } else {
-                self.error(equals, "Invalid assignment target.")
+            match expr {
+                Expr::Variable(var) => Ok(Expr::new_assign(var.name, Box::new(value))),
+                Expr::Get(get) => Ok(Expr::new_set(get.object, get.name, Box::new(value))),
+                _ => self.error(equals, "Invalid assignment target."),
             }
         } else {
             Ok(expr)
@@ -350,6 +368,9 @@ impl Parser {
         loop {
             if self.match_(&[TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_(&[TokenType::Dot]) {
+                let name = self.consume_identifier("Expect property name after '.'.")?;
+                expr = Expr::new_get(Box::new(expr), name);
             } else {
                 break;
             }
@@ -366,6 +387,7 @@ impl Parser {
             TokenType::Nil => Ok(Expr::Literal(Literal::Nil)),
             TokenType::Number(n) => Ok(Expr::Literal(Literal::Number(n))),
             TokenType::String(s) => Ok(Expr::Literal(Literal::String(s))),
+            TokenType::This => Ok(Expr::new_this(self.previous())),
             TokenType::Identifier(_) => Ok(Expr::new_variable(self.previous())),
             TokenType::LeftParen => {
                 let expr = self.expression()?;

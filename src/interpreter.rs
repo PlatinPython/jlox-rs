@@ -7,22 +7,22 @@ use std::time::SystemTime;
 
 use crate::ast;
 use crate::ast::{
-    Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Grouping, If, Literal, Logical,
-    Print, Return, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
+    Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Get, Grouping, If, Literal,
+    Logical, Print, Return, Set, Stmt, StmtVisitor, This, Unary, Var, Variable, Walkable, While,
 };
 use crate::environment::{Environment, EnvironmentExt};
 use crate::token::{Token, TokenType};
 
 trait Callable {
     fn arity(&self) -> usize;
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value>;
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result;
 }
 
 #[derive(Debug, Clone)]
 pub struct NativeFunction {
     pub name: String,
     pub arity: usize,
-    pub fun: fn(&mut Interpreter, Vec<Value>) -> Result<Value>,
+    pub fun: fn(&mut Interpreter, Vec<Value>) -> Result,
 }
 
 impl PartialEq for NativeFunction {
@@ -36,7 +36,7 @@ impl Callable for NativeFunction {
         self.arity
     }
 
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value> {
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result {
         (self.fun)(interpreter, arguments)
     }
 }
@@ -45,6 +45,19 @@ impl Callable for NativeFunction {
 pub struct Function {
     pub declaration: ast::Function,
     pub closure: Rc<RefCell<Environment>>,
+    pub is_initializer: bool,
+}
+
+impl Function {
+    fn bind(&self, instance: Rc<RefCell<Instance>>) -> Self {
+        let mut environment = Environment::new_enclosing(self.closure.clone());
+        environment.define("this", Value::Instance(instance));
+        Self {
+            declaration: self.declaration.clone(),
+            closure: Rc::new(RefCell::new(environment)),
+            is_initializer: self.is_initializer,
+        }
+    }
 }
 
 impl Callable for Function {
@@ -52,7 +65,7 @@ impl Callable for Function {
         self.declaration.params.len()
     }
 
-    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value> {
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result {
         let mut environment = Environment::new_enclosing(self.closure.clone());
         for (param, arg) in self.declaration.params.iter().zip(arguments) {
             environment.define(&param.lexeme, arg.clone());
@@ -60,10 +73,82 @@ impl Callable for Function {
 
         match interpreter.execute_block(&self.declaration.body, Rc::new(RefCell::new(environment)))
         {
-            Err(Error::Return { value }) => Ok(value),
+            Ok(_) | Err(Error::Return { .. }) if self.is_initializer => Ok(self
+                .closure
+                .get_at(0, "this")
+                .expect("The current environment should exist.")),
+            Err(Error::Return { value }) => Ok(*value),
             Err(err) => Err(err),
             _ => Ok(Value::Nil),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Class {
+    pub name: String,
+    pub methods: HashMap<String, Function>,
+}
+
+impl Class {
+    pub fn find_method(&self, name: &str) -> Option<&Function> {
+        self.methods.get(name)
+    }
+}
+
+impl Callable for Rc<Class> {
+    fn arity(&self) -> usize {
+        if let Some(initializer) = self.find_method("init") {
+            initializer.arity()
+        } else {
+            0
+        }
+    }
+
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result {
+        let instance = Rc::new(RefCell::new(Instance {
+            class: self.clone(),
+            fields: HashMap::new(),
+        }));
+        if let Some(initializer) = self.find_method("init") {
+            initializer
+                .bind(instance.clone())
+                .call(interpreter, arguments)?;
+        }
+        Ok(Value::Instance(instance))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instance {
+    pub class: Rc<Class>,
+    pub fields: HashMap<String, Value>,
+}
+
+trait ImplExt {
+    fn get(&self, name: &Token) -> Result;
+    fn set(&self, name: &Token, value: Value) -> Result;
+}
+
+impl ImplExt for Rc<RefCell<Instance>> {
+    fn get(&self, name: &Token) -> Result {
+        if let Some(val) = self.borrow().fields.get(&name.lexeme) {
+            Ok(val.clone())
+        } else if let Some(method) = self.borrow().class.find_method(&name.lexeme) {
+            Ok(Value::Function(method.bind(self.clone())))
+        } else {
+            Err(Error::Error {
+                token: name.clone(),
+                message: format!("Undefined property '{}'.", name.lexeme),
+            })
+        }
+    }
+
+    fn set(&self, name: &Token, value: Value) -> Result {
+        self.borrow_mut()
+            .fields
+            .insert(name.lexeme.clone(), value.clone());
+        Ok(value)
     }
 }
 
@@ -75,6 +160,8 @@ pub enum Value {
     String(String),
     NativeFunction(NativeFunction),
     Function(Function),
+    Class(Rc<Class>),
+    Instance(Rc<RefCell<Instance>>),
 }
 
 impl Value {
@@ -94,14 +181,22 @@ impl Display for Value {
             Value::Function(Function { declaration, .. }) => {
                 write!(f, "<fn {}>", declaration.name.lexeme)
             }
+            Value::Class(class) => write!(f, "{}", class.name),
+            Value::Instance(instance) => write!(f, "{} instance", instance.borrow().class.name),
         }
     }
 }
 
 #[derive(Debug)]
 pub enum Error {
-    Error { token: Token, message: String },
-    Return { value: Value },
+    #[allow(dead_code)]
+    Error {
+        token: Token,
+        message: String,
+    },
+    Return {
+        value: Box<Value>,
+    },
 }
 
 type Result<T = Value> = std::result::Result<T, Error>;
@@ -165,6 +260,17 @@ impl Interpreter {
         self.locals.insert(expr.clone(), depth);
     }
 
+    fn look_up_variable(&self, name: &Token, expr: &Expr) -> Result {
+        match self.locals.get(expr) {
+            Some(distance) => self.environment.get_at(*distance, &name.lexeme),
+            None => self.globals.borrow().get(name),
+        }
+        .ok_or(Error::Error {
+            token: name.clone(),
+            message: format!("Undefined variable '{}'.", name.lexeme),
+        })
+    }
+
     fn error(&self, token: &Token, message: &str) -> Result {
         Err(Error::Error {
             token: token.clone(),
@@ -186,6 +292,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
         })
     }
 
+    //noinspection DuplicatedCode
     fn visit_binary(self, expr: &Binary) -> Result {
         let left = self.evaluate(&expr.left)?;
         let right = self.evaluate(&expr.right)?;
@@ -244,6 +351,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
         let function: Box<dyn Callable> = match callee {
             Value::NativeFunction(n) => Box::new(n),
             Value::Function(f) => Box::new(f),
+            Value::Class(c) => Box::new(c),
             _ => return self.error(&expr.paren, "Can only call functions and classes."),
         };
 
@@ -259,6 +367,14 @@ impl ExprVisitor<Result> for &mut Interpreter {
         }
 
         function.call(self, arguments)
+    }
+
+    fn visit_get(self, expr: &Get) -> Result {
+        if let Value::Instance(object) = self.evaluate(&expr.object)? {
+            object.get(&expr.name)
+        } else {
+            self.error(&expr.name, "Only instances have properties.")
+        }
     }
 
     fn visit_grouping(self, expr: &Grouping) -> Result {
@@ -289,6 +405,19 @@ impl ExprVisitor<Result> for &mut Interpreter {
         self.evaluate(&expr.right)
     }
 
+    fn visit_set(self, expr: &Set) -> Result {
+        if let Value::Instance(object) = self.evaluate(&expr.object)? {
+            let value = self.evaluate(&expr.value)?;
+            object.set(&expr.name, value)
+        } else {
+            self.error(&expr.name, "Only instances have fields.")
+        }
+    }
+
+    fn visit_this(self, expr: &This) -> Result {
+        self.look_up_variable(&expr.keyword, &Expr::This(expr.clone()))
+    }
+
     fn visit_unary(self, expr: &Unary) -> Result {
         let right = self.evaluate(&expr.right)?;
 
@@ -303,14 +432,7 @@ impl ExprVisitor<Result> for &mut Interpreter {
     }
 
     fn visit_variable(self, expr: &Variable) -> Result {
-        match self.locals.get(&Expr::Variable(expr.clone())) {
-            Some(distance) => self.environment.get_at(*distance, &expr.name),
-            None => self.globals.borrow().get(&expr.name),
-        }
-        .ok_or(Error::Error {
-            token: expr.name.clone(),
-            message: format!("Undefined variable '{}'.", expr.name.lexeme),
-        })
+        self.look_up_variable(&expr.name, &Expr::Variable(expr.clone()))
     }
 }
 
@@ -324,6 +446,30 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
         )
     }
 
+    fn visit_class(self, stmt: &ast::Class) -> Result<()> {
+        self.environment
+            .borrow_mut()
+            .define(&stmt.name.lexeme, Value::Nil);
+
+        let mut methods = HashMap::new();
+        for method in &stmt.methods {
+            let function = Function {
+                declaration: method.clone(),
+                closure: self.environment.clone(),
+                is_initializer: method.name.lexeme == "init",
+            };
+            methods.insert(method.name.lexeme.clone(), function);
+        }
+
+        let class = Value::Class(Rc::new(Class {
+            name: stmt.name.lexeme.clone(),
+            methods,
+        }));
+        self.environment.borrow_mut().assign(&stmt.name, class);
+
+        Ok(())
+    }
+
     fn visit_expression(self, stmt: &Expression) -> Result<()> {
         self.evaluate(&stmt.expr).map(|_| ())
     }
@@ -332,6 +478,7 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
         let function = Value::Function(Function {
             declaration: stmt.clone(),
             closure: self.environment.clone(),
+            is_initializer: false,
         });
         self.environment
             .borrow_mut()
@@ -361,7 +508,9 @@ impl StmtVisitor<Result<()>> for &mut Interpreter {
             Value::Nil
         };
 
-        Err(Error::Return { value })
+        Err(Error::Return {
+            value: Box::new(value),
+        })
     }
 
     fn visit_var(self, stmt: &Var) -> Result<()> {

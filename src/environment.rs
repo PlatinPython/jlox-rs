@@ -66,16 +66,16 @@ impl Environment {
 }
 
 pub trait EnvironmentExt {
-    fn get_at(&self, distance: usize, name: &Token) -> Option<Value>;
+    fn get_at(&self, distance: usize, name: &str) -> Option<Value>;
     fn assign_at(&mut self, distance: usize, name: &Token, value: Value) -> Option<Value>;
 }
 
 impl EnvironmentExt for Rc<RefCell<Environment>> {
-    fn get_at(&self, distance: usize, name: &Token) -> Option<Value> {
+    fn get_at(&self, distance: usize, name: &str) -> Option<Value> {
         Environment::ancestor(self.clone(), distance)?
             .borrow()
             .values
-            .get(&name.lexeme)
+            .get(name)
             .cloned()
     }
 

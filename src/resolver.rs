@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use crate::ast::{
-    Assign, Binary, Block, Call, Expr, ExprVisitor, Expression, Function, Grouping, If, Literal,
-    Logical, Print, Return, Stmt, StmtVisitor, Unary, Var, Variable, Walkable, While,
+    Assign, Binary, Block, Call, Class, Expr, ExprVisitor, Expression, Function, Get, Grouping, If,
+    Literal, Logical, Print, Return, Set, Stmt, StmtVisitor, This, Unary, Var, Variable, Walkable,
+    While,
 };
 use crate::interpreter::Interpreter;
 use crate::token::Token;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Error {
     token: Token,
@@ -36,12 +38,21 @@ macro_rules! combine_results {
 enum FunctionType {
     None,
     Function,
+    Initializer,
+    Method,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ClassType {
+    None,
+    Class,
 }
 
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
     scopes: Vec<HashMap<String, bool>>,
     current_function: FunctionType,
+    current_class: ClassType,
 }
 
 impl<'a> Resolver<'a> {
@@ -50,6 +61,7 @@ impl<'a> Resolver<'a> {
             interpreter,
             scopes: Vec::new(),
             current_function: FunctionType::None,
+            current_class: ClassType::None,
         }
     }
 
@@ -136,22 +148,27 @@ impl ExprVisitor<Result> for &mut Resolver<'_> {
     }
 
     fn visit_binary(self, expr: &Binary) -> Result {
-        self.resolve_expr(&expr.left)?;
-        self.resolve_expr(&expr.right)?;
-        Ok(())
+        let mut res = Ok(());
+        combine_results!(res, self.resolve_expr(&expr.left));
+        combine_results!(res, self.resolve_expr(&expr.right));
+        res
     }
 
     fn visit_call(self, expr: &Call) -> Result {
-        self.resolve_expr(&expr.callee)?;
+        let mut res = Ok(());
+        combine_results!(res, self.resolve_expr(&expr.callee));
         for arg in &expr.arguments {
-            self.resolve_expr(arg)?;
+            combine_results!(res, self.resolve_expr(arg));
         }
-        Ok(())
+        res
+    }
+
+    fn visit_get(self, expr: &Get) -> Result {
+        self.resolve_expr(&expr.object)
     }
 
     fn visit_grouping(self, expr: &Grouping) -> Result {
-        self.resolve_expr(&expr.expr)?;
-        Ok(())
+        self.resolve_expr(&expr.expr)
     }
 
     fn visit_literal(self, _: &Literal) -> Result {
@@ -165,9 +182,24 @@ impl ExprVisitor<Result> for &mut Resolver<'_> {
         res
     }
 
-    fn visit_unary(self, expr: &Unary) -> Result {
-        self.resolve_expr(&expr.right)?;
+    fn visit_set(self, expr: &Set) -> Result {
+        let mut res = Ok(());
+        combine_results!(res, self.resolve_expr(&expr.value));
+        combine_results!(res, self.resolve_expr(&expr.object));
+        res
+    }
+
+    fn visit_this(self, expr: &This) -> Result {
+        if self.current_class == ClassType::None {
+            return self.error(&expr.keyword, "Can't use 'this' outside of a class.");
+        }
+
+        self.resolve_local(&Expr::This(expr.clone()), &expr.keyword);
         Ok(())
+    }
+
+    fn visit_unary(self, expr: &Unary) -> Result {
+        self.resolve_expr(&expr.right)
     }
 
     fn visit_variable(self, expr: &Variable) -> Result {
@@ -192,9 +224,36 @@ impl StmtVisitor<Result> for &mut Resolver<'_> {
         Ok(())
     }
 
+    fn visit_class(self, stmt: &Class) -> Result {
+        let mut res = Ok(());
+        let enclosing_class = std::mem::replace(&mut self.current_class, ClassType::Class);
+
+        combine_results!(res, self.declare(&stmt.name));
+        self.define(&stmt.name);
+
+        self.begin_scope();
+        self.scopes
+            .last_mut()
+            .expect("begin_scope should have added a scope")
+            .insert("this".to_string(), true);
+
+        for method in &stmt.methods {
+            let declaration = if method.name.lexeme == "init" {
+                FunctionType::Initializer
+            } else {
+                FunctionType::Method
+            };
+            combine_results!(res, self.resolve_function(method, declaration));
+        }
+
+        self.end_scope();
+
+        self.current_class = enclosing_class;
+        res
+    }
+
     fn visit_expression(self, stmt: &Expression) -> Result {
-        self.resolve_expr(&stmt.expr)?;
-        Ok(())
+        self.resolve_expr(&stmt.expr)
     }
 
     fn visit_function(self, stmt: &Function) -> Result {
@@ -216,8 +275,7 @@ impl StmtVisitor<Result> for &mut Resolver<'_> {
     }
 
     fn visit_print(self, stmt: &Print) -> Result {
-        self.resolve_expr(&stmt.expr)?;
-        Ok(())
+        self.resolve_expr(&stmt.expr)
     }
 
     fn visit_return(self, stmt: &Return) -> Result {
@@ -225,6 +283,9 @@ impl StmtVisitor<Result> for &mut Resolver<'_> {
             return self.error(&stmt.keyword, "Can't return from top-level code.");
         }
         if let Some(value) = &stmt.value {
+            if self.current_function == FunctionType::Initializer {
+                return self.error(&stmt.keyword, "Can't return a value from an initializer.");
+            }
             self.resolve_expr(value)?;
         }
         Ok(())

@@ -1,5 +1,6 @@
 use crate::token::{Token, TokenType};
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
     UnexpectedCharacter { character: char, line: usize },

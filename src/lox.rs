@@ -8,6 +8,7 @@ use crate::resolver::Resolver;
 use crate::scanner::Scanner;
 use crate::{interpreter, parser, resolver, scanner};
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
     Scanner(Vec<scanner::Error>),
